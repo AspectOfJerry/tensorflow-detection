@@ -2,6 +2,8 @@ import os
 import tensorflow as tf
 import xml
 
+from utils import log, Ccodes
+
 
 class CustomDataset(tf.keras.utils.Sequence):
     def __init__(self, root_dir, data_split, image_size, batch_size, label_map):
@@ -18,6 +20,7 @@ class CustomDataset(tf.keras.utils.Sequence):
         return len(self.image_files)
 
     def __getitem__(self, idx):
+        log
         image_file = os.path.join(self.image_dir, self.image_files[idx])
         image = tf.image.decode_jpeg(tf.io.read_file(image_file), channels=3)
 
@@ -28,7 +31,7 @@ class CustomDataset(tf.keras.utils.Sequence):
         original_size = tf.shape(image)[:2]
         scale_width = self.image_size[1] / tf.cast(original_size[1], dtype=tf.float32)
         scale_height = self.image_size[0] / tf.cast(original_size[0], dtype=tf.float32)
-        print(scale_width, scale_height)
+
         # Resize the image
         image = tf.image.resize(image, self.image_size)
         image = tf.image.per_image_standardization(image)
@@ -43,14 +46,18 @@ class CustomDataset(tf.keras.utils.Sequence):
             ymax *= scale_height
             adjusted_bounding_boxes.append({"labels": box["labels"], "boxes": [xmin, ymin, xmax, ymax]})
 
+        log(f"- Bounding boxes: {adjusted_bounding_boxes}", Ccodes.GRAY)
+
         target_boxes = tf.convert_to_tensor([bb["boxes"] for bb in adjusted_bounding_boxes], dtype=tf.float32)
 
         labels = [label for bb in adjusted_bounding_boxes for label in bb["labels"]]
         label_indices = tf.convert_to_tensor([self.label_map[label] for label in labels], dtype=tf.int64)
 
+        print(tf.shape(image), tf.shape(target_boxes), tf.shape(label_indices))
         return image, {"boxes": target_boxes, "labels": label_indices}
 
     def parse_xml_annotation(self, xml_file):
+        log(f"Parsing {xml_file}")
         tree = xml.etree.ElementTree.parse(xml_file)
         root = tree.getroot()
 
