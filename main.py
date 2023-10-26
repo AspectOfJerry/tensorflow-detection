@@ -30,71 +30,75 @@ train_dataset = CustomDataset(DATASET_DIR, "train", INPUT_SHAPE, BATCH_SIZE, LAB
 
 log(f"Number of training images: {len(train_dataset)}", Ccodes.GREEN)
 
+import keras
+
+
 # Define the model architecture
-def custom_model_sequential(input_shape, num_classes):
+def custom_model(input_shape, num_classes):
     NUM_SCALES = 3
     NUM_ASPECT_RATIOS = 3
     NUM_LOCATIONS = 64 * 64
     NUM_ANCHORS = NUM_SCALES * NUM_ASPECT_RATIOS * NUM_LOCATIONS
 
+    # TODO: Add anchor box generation and other object detection components here
+
     # Backbone (Convolutional Base)
     input_tensor = keras.layers.Input(shape=input_shape)
-    backbone = keras.applications.ResNet50(include_top=False, input_tensor=input_tensor)
-
-    # Region Proposal Network (RPN)
-    rpn_conv = keras.layers.Conv2D(256, (3, 3), activation="relu", padding="same")(backbone.output)
-    rpn_class = keras.layers.Conv2D(NUM_ANCHORS, (1, 1), activation="sigmoid", name="rpn_class")(rpn_conv)
-    rpn_bbox = keras.layers.Conv2D(NUM_ANCHORS * 4, (1, 1), activation="linear", name="rpn_bbox")(rpn_conv)
-
-    # Detection Head
-    detection_head = keras.Sequential([
-        keras.layers.Conv2D(256, (3, 3), activation="relu", padding="same"),
-        keras.layers.Conv2D(256, (3, 3), activation="relu", padding="same"),
-        keras.layers.Conv2D(256, (3, 3), activation="relu", padding="same"),
-        keras.layers.Conv2D(256, (3, 3), activation="relu", padding="same"),
+    backbone = keras.Sequential([
+        keras.layers.Conv2D(32, (3, 3), strides=(2, 2), activation="relu", padding="valid", input_shape=input_shape),  # 1
+        keras.layers.DepthwiseConv2D(32, (3, 3), strides=(1, 1), activation="relu", padding="same"),  # 2
+        keras.layers.Conv2D(64, (1, 1), strides=(1, 1), activation="relu", padding="valid", ),  # 3
+        keras.layers.DepthwiseConv2D(64, (3, 3), strides=(2, 2), activation="relu", padding="same"),  # 4
+        keras.layers.Conv2D(128, (1, 1), strides=(1, 1), activation="relu", padding="valid"),  # 5
+        keras.layers.DepthwiseConv2D(128, (3, 3), strides=(1, 1), activation="relu", padding="same"),  # 6
+        keras.layers.Conv2D(128, (1, 1), strides=(1, 1), activation="relu", padding="valid"),  # 7
+        keras.layers.DepthwiseConv2D(128, (3, 3), strides=(2, 2), activation="relu", padding="same"),  # 8
+        keras.layers.Conv2D(256, (1, 1), strides=(1, 1), activation="relu", padding="valid"),  # 9
+        keras.layers.DepthwiseConv2D(256, (3, 3), strides=(1, 1), activation="relu", padding="same"),  # 10
+        keras.layers.Conv2D(256, (1, 1), strides=(1, 1), activation="relu", padding="valid"),  # 11
+        keras.layers.DepthwiseConv2D(256, (3, 3), strides=(2, 2), activation="relu", padding="same"),  # 12
+        keras.layers.Conv2D(512, (1, 1), strides=(1, 1), activation="relu", padding="valid"),  # 13
+        keras.layers.DepthwiseConv2D(512, (3, 3), strides=(1, 1), activation="relu", padding="same"),  # 14
+        keras.layers.Conv2D(512, (1, 1), strides=(1, 1), activation="relu", padding="valid"),  # 15
+        keras.layers.DepthwiseConv2D(512, (3, 3), strides=(1, 1), activation="relu", padding="same"),  # 16
+        keras.layers.Conv2D(512, (1, 1), strides=(1, 1), activation="relu", padding="valid"),  # 17
+        keras.layers.DepthwiseConv2D(512, (3, 3), strides=(1, 1), activation="relu", padding="same"),  # 18
+        keras.layers.Conv2D(512, (1, 1), strides=(1, 1), activation="relu", padding="valid"),  # 19
+        keras.layers.DepthwiseConv2D(512, (3, 3), strides=(1, 1), activation="relu", padding="same"),  # 20
+        keras.layers.Conv2D(512, (1, 1), strides=(1, 1), activation="relu", padding="valid"),  # 21
+        keras.layers.DepthwiseConv2D(512, (3, 3), strides=(1, 1), activation="relu", padding="same"),  # 22
+        keras.layers.Conv2D(512, (1, 1), strides=(1, 1), activation="relu", padding="valid"),  # 23
+        keras.layers.DepthwiseConv2D(512, (3, 3), strides=(2, 2), activation="relu", padding="same"),  # 24
+        keras.layers.Conv2D(1024, (1, 1), strides=(1, 1), activation="relu", padding="valid"),  # 25
+        keras.layers.DepthwiseConv2D(1024, (3, 3), strides=(1, 1), activation="relu", padding="same"),  # 26
+        keras.layers.Conv2D(1024, (1, 1), strides=(1, 1), activation="relu", padding="valid"),  # 27
+        keras.layers.DepthwiseConv2D(1024, (3, 3), strides=(1, 1), activation="relu", padding="same"),  # 28
+        keras.layers.Conv2D(1001, (1, 1), strides=(1, 1), activation="relu", padding="valid"),  # 29
+        keras.layers.AveragePooling2D((7, 7), strides=(1, 1), padding="same"),  # 30
+        keras.layers.Conv2D(1001, (1, 1), strides=(1, 1), activation="relu", padding="valid"),  # 31
+        keras.layers.Softmax()  # 32
     ])
 
     # Object Detection Output
-    detection_class = keras.layers.Conv2D(num_classes, (1, 1), activation="softmax", name="detection_class")(detection_head(rpn_conv))
-    detection_bbox = keras.layers.Conv2D(num_classes * 4, (1, 1), name="detection_bbox")(detection_head(rpn_conv))
+    # TODO: Add object detection output layers here
+    detection_head = keras.Sequential([
+        keras.layers.Conv2D(256, (3, 3), activation="relu", padding="same"),
+        keras.layers.Conv2D(256, (3, 3), activation="relu", padding="same"),
+        # Add more convolutional layers as needed
+    ])
+
+    detection_class = keras.layers.Conv2D(NUM_CLASSES, (1, 1), activation="softmax", name="detection_class")(detection_head)
+    detection_bbox = keras.layers.Conv2D(NUM_CLASSES * 4, (1, 1), name="detection_bbox")(detection_head)
 
     # Create the model
-    model = keras.Model(inputs=input_tensor, outputs=[rpn_class, rpn_bbox, detection_class, detection_bbox])
-
-    return model
-
-
-def custom_ssd_lite(input_shape, num_classes):
-    # Define the MobileNetV3 backbone
-    backbone = keras.applications.MobileNetV3Large(input_shape=input_shape, include_top=False)
-
-    # Feature Pyramid Network (FPN) layers
-    x = keras.layers.Conv2D(256, (1, 1), activation="relu", name="fpn_c5p5")(backbone.layers[-1].output)
-    x = keras.layers.UpSampling2D(size=(2, 2), name="fpn_p5upsampled")(x)
-    x = keras.layers.Add(name="fpn_p4add")([x, backbone.layers[-4].output])
-    x = keras.layers.Conv2D(256, (1, 1), activation="relu", name="fpn_p4")(x)
-    x = keras.layers.UpSampling2D(size=(2, 2), name="fpn_p4upsampled")(x)
-    x = keras.layers.Add(name="fpn_p3add")([x, backbone.layers[-7].output])
-    x = keras.layers.Conv2D(256, (1, 1), activation="relu", name="fpn_p3")(x)
-    x = keras.layers.UpSampling2D(size=(2, 2), name="fpn_p3upsampled")(x)
-    x = keras.layers.Add(name="fpn_p2add")([x, backbone.layers[-10].output])
-    x = keras.layers.Conv2D(256, (1, 1), activation="relu", name="fpn_p2")(x)
-
-    # SSD Head
-    num_anchors = 3 * 3  # NUM_SCALES * NUM_ASPECT_RATIOS
-    x = keras.layers.Conv2D(256, (3, 3), activation="relu", padding="same", name="ssd_head")(x)
-    classification = keras.layers.Conv2D(num_anchors * num_classes, (3, 3), padding="same", name="classification")(x)
-    regression = keras.layers.Conv2D(num_anchors * 4, (3, 3), padding="same", name="regression")(x)
-
-    # Create the model
-    model = keras.Model(inputs=backbone.input, outputs=[classification, regression])
+    # model = keras.Model(inputs=input_tensor, outputs=[rpn_class, rpn_bbox, detection_class, detection_bbox])
 
     return model
 
 
 # Create the model
 # model = custom_model_sequential((224, 224, 3), NUM_CLASSES)
-model = custom_ssd_lite((3024, 3024, 3), NUM_CLASSES)
+model = custom_model((224, 224, 3), NUM_CLASSES)
 
 
 # Custom loss function
