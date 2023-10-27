@@ -3,7 +3,7 @@ from tensorflow import keras
 
 def custom_model():
     backbone = keras.Sequential([
-        keras.layers.Conv2D(32, (3, 3), strides=2, activation="relu", input_shape=(224, 224, 3)),  # 1
+        keras.layers.Conv2D(32, (3, 3), strides=2, activation="relu", input_shape=(512, 512, 3)),  # 1
         keras.layers.DepthwiseConv2D((3, 3), strides=1, activation="relu", padding="same"),  # 2
         keras.layers.Conv2D(64, (1, 1), strides=1, activation="relu", padding="same"),  # 3
         keras.layers.DepthwiseConv2D((3, 3), strides=2, activation="relu", padding="same"),  # 4
@@ -31,17 +31,17 @@ def custom_model():
         keras.layers.DepthwiseConv2D((3, 3), strides=1, activation="relu", padding="same"),  # 26
         keras.layers.Conv2D(1024, (1, 1), strides=1, activation="relu", padding="same"),  # 27
         keras.layers.AveragePooling2D((7, 7), strides=1, padding="valid"),  # 28
-        keras.layers.Flatten(),  # 29
+        keras.layers.Flatten(),  # 29 multi dimensional to linear before passing to dense layer
         keras.layers.Dense(1024, activation="relu"),  # 29 (fully connected)
         keras.layers.Dense(2, activation="softmax")  # 30 (Softmax), Classifier
     ])
 
-    detection_head = keras.Sequential([
-        keras.layers.Conv2D(2, (3, 3), activation="relu", padding="same"),
-        # Add more convolutional layers for object detection as needed
-    ])
+    # detection_head = keras.Sequential([
+    #     keras.layers.Conv2D(2, (3, 3), activation="relu", padding="same"),
+    #     Add more convolutional layers for object detection as needed
+    # ])
 
-    return model
+    return backbone
 
 
 model = custom_model()

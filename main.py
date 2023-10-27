@@ -72,7 +72,7 @@ def custom_model(input_shape, num_classes):
         keras.layers.DepthwiseConv2D((3, 3), strides=1, activation="relu", padding="same"),  # 26
         keras.layers.Conv2D(1024, (1, 1), strides=1, activation="relu", padding="same"),  # 27
         keras.layers.AveragePooling2D((7, 7), strides=1, padding="valid"),  # 28
-        keras.layers.Flatten(),  # 29
+        keras.layers.Flatten(),  # 29 multi dimensional to linear before passing to dense layer
         keras.layers.Dense(1024, activation="relu"),  # 29 (fully connected)
         keras.layers.Dense(NUM_CLASSES, activation="softmax")  # 30 (Softmax), Classifier
     ])
