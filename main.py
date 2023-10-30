@@ -39,10 +39,7 @@ def custom_model(input_shape, num_classes):
     NUM_LOCATIONS = 64 * 64
     NUM_ANCHORS = NUM_SCALES * NUM_ASPECT_RATIOS * NUM_LOCATIONS
 
-    # TODO: Add anchor box generation and other object detection components here
-
     # Backbone (Convolutional Base)
-    input_tensor = keras.layers.Input(shape=input_shape)
     backbone = keras.Sequential([
         keras.layers.Conv2D(32, (3, 3), strides=2, activation="relu", input_shape=(224, 224, 3)),  # 1
         keras.layers.DepthwiseConv2D((3, 3), strides=1, activation="relu", padding="same"),  # 2
@@ -81,6 +78,19 @@ def custom_model(input_shape, num_classes):
         keras.layers.Conv2D(num_classes, (3, 3), activation="relu", padding="same"),
         # Add more convolutional layers for object detection as needed
     ])
+
+    # Anchors
+    # how the hell am i supposed to do the anchor generation
+    anchors = tf.ones((NUM_ANCHORS, 4), dtype=tf.float32)
+
+    input_tensor = keras.layers.Input(shape=input_shape)
+
+    # Connect backbone output to detection head input
+    x = backbone(input_tensor)
+    detection_output = detection_head(x)
+
+    # Create the complete model
+    model = keras.Model(inputs=input_tensor, outputs=[detection_output, anchors])
 
     return model
 

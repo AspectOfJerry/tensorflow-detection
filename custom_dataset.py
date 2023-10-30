@@ -20,7 +20,6 @@ class CustomDataset(tf.keras.utils.Sequence):
         return len(self.image_files)
 
     def __getitem__(self, idx):
-        log
         image_file = os.path.join(self.image_dir, self.image_files[idx])
         image = tf.image.decode_jpeg(tf.io.read_file(image_file), channels=3)
 
