@@ -28,23 +28,28 @@ class CustomDataset(tf.keras.utils.Sequence):
 
         # Calculate the scaling factors
         original_size = tf.shape(image)[:2]
-        scale_width = self.image_size[1] / tf.cast(original_size[1], dtype=tf.float32)
-        scale_height = self.image_size[0] / tf.cast(original_size[0], dtype=tf.float32)
+        original_height, original_width = tf.cast(original_size[0], dtype=tf.float32), tf.cast(original_size[1], dtype=tf.float32)
+        scale_width = self.image_size[1] / original_width
+        scale_height = self.image_size[0] / original_height
 
         # Resize the image
-        image = tf.image.resize(image, self.image_size)
+        image = tf.image.resize(image, list(self.image_size)[:2])
         image = tf.image.per_image_standardization(image)
 
-        # Adjust bounding box coordinates
+        image = tf.expand_dims(image, axis=0)  # Add a batch dimension
+
+        # Adjust bounding box coordinates [0, 1]
         adjusted_bounding_boxes = []
         for box in bounding_boxes:
             xmin, ymin, xmax, ymax = box["boxes"]
-            xmin *= scale_width
-            xmax *= scale_width
-            ymin *= scale_height
-            ymax *= scale_height
+            xmin = tf.cast(xmin, tf.float32) / original_width
+            xmax = tf.cast(xmax, tf.float32) / original_width
+            ymin = tf.cast(ymin, tf.float32) / original_height
+            ymax = tf.cast(ymax, tf.float32) / original_height
             adjusted_bounding_boxes.append({"labels": box["labels"], "boxes": [xmin, ymin, xmax, ymax]})
 
+        print("image shape", image.shape)
+        print("adjusted bboxes", adjusted_bounding_boxes)
         log(f"- Bounding boxes: {adjusted_bounding_boxes}", Ccodes.GRAY)
 
         target_boxes = tf.convert_to_tensor([bb["boxes"] for bb in adjusted_bounding_boxes], dtype=tf.float32)
@@ -52,8 +57,10 @@ class CustomDataset(tf.keras.utils.Sequence):
         labels = [label for bb in adjusted_bounding_boxes for label in bb["labels"]]
         label_indices = tf.convert_to_tensor([self.label_map[label] for label in labels], dtype=tf.int64)
 
-        print(tf.shape(image), tf.shape(target_boxes), tf.shape(label_indices))
-        return image, {"boxes": target_boxes, "labels": label_indices}
+        # Combine boxes and labels into a single tensor for the loss function
+        y_true = tf.concat([target_boxes, tf.one_hot(label_indices, depth=len(self.label_map))], axis=-1)
+
+        return image, y_true
 
     def parse_xml_annotation(self, xml_file):
         log(f"Parsing {xml_file}")

@@ -9,19 +9,19 @@ DATASET_DIR = "./dataset"
 OUTPUT_DIR = "./output"
 
 # NUM_CLASSES = 3  # Number of classes, including the background class (+1) <- ?
-NUM_CLASSES = 2
-INPUT_SHAPE = (224, 224)
-
-NUM_EPOCHS = 16
-BATCH_SIZE = 32
+NUM_CLASSES = 3
 LABEL_MAP = {
     "background": 0,
     "cube": 1,
-    "cone": 2,
+    "cone": 2
 }
 
+INPUT_SHAPE = (224, 224, 3)
+NUM_EPOCHS = 16
+BATCH_SIZE = 32
+
 log(f"Training configuration:"
-    f"\n\t- Number of classes: {NUM_CLASSES}"
+    f"\n\t- Number of classes (including background): {NUM_CLASSES}"
     f"\n\t- Input size: {INPUT_SHAPE}"
     f"\n\t- Number of epochs: {NUM_EPOCHS}"
     f"\n\t- Batch size: {BATCH_SIZE}"
@@ -32,16 +32,42 @@ train_dataset = CustomDataset(DATASET_DIR, "train", INPUT_SHAPE, BATCH_SIZE, LAB
 log(f"Number of training images: {len(train_dataset)}", Ccodes.GREEN)
 
 
+def generate_anchors(input_shape, scales, aspect_ratios):
+    anchors = []
+
+    input_height, input_width = input_shape[:2]
+
+    for scale in scales:
+        for aspect_ratio in aspect_ratios:
+            width = scale * aspect_ratio
+            height = scale / aspect_ratio
+
+            x_center = input_width / 2
+            y_center = input_height / 2
+
+            x1 = x_center - width / 2
+            y1 = y_center - height / 2
+            x2 = x_center + width / 2
+            y2 = y_center + height / 2
+
+            anchors.append([x1, y1, x2, y2])
+
+    return tf.constant(anchors, dtype=tf.float32)
+
+
+# Generate the anchors
+scales = [1.0, 2.0]
+aspect_ratios = [1.0, 2.0]
+anchors = generate_anchors(INPUT_SHAPE, scales, aspect_ratios)
+
+
 # Define the model architecture (based on MobileNet)
-def custom_model(input_shape, num_classes):
-    NUM_SCALES = 3
-    NUM_ASPECT_RATIOS = 3
-    NUM_LOCATIONS = 64 * 64
-    NUM_ANCHORS = NUM_SCALES * NUM_ASPECT_RATIOS * NUM_LOCATIONS
+def custom_model(input_shape, num_classes, anchors):
+    num_anchors = len(anchors)
 
     # Backbone (Convolutional Base)
     backbone = keras.Sequential([
-        keras.layers.Conv2D(32, (3, 3), strides=2, activation="relu", input_shape=(224, 224, 3)),  # 1
+        keras.layers.Conv2D(32, (3, 3), strides=2, activation="relu", input_shape=input_shape),  # 1
         keras.layers.DepthwiseConv2D((3, 3), strides=1, activation="relu", padding="same"),  # 2
         keras.layers.Conv2D(64, (1, 1), strides=1, activation="relu", padding="same"),  # 3
         keras.layers.DepthwiseConv2D((3, 3), strides=2, activation="relu", padding="same"),  # 4
@@ -69,54 +95,56 @@ def custom_model(input_shape, num_classes):
         keras.layers.DepthwiseConv2D((3, 3), strides=1, activation="relu", padding="same"),  # 26
         keras.layers.Conv2D(1024, (1, 1), strides=1, activation="relu", padding="same"),  # 27
         keras.layers.AveragePooling2D((7, 7), strides=1, padding="valid"),  # 28
-        keras.layers.Flatten(),  # 29 multi dimensional to linear before passing to dense layer
-        keras.layers.Dense(1024, activation="relu"),  # 29 (fully connected)
-        keras.layers.Dense(NUM_CLASSES, activation="softmax")  # 30 (Softmax), Classifier
     ])
 
+    # Detection head
     detection_head = keras.Sequential([
-        keras.layers.Conv2D(num_classes, (3, 3), activation="relu", padding="same"),
-        # Add more convolutional layers for object detection as needed
+        keras.layers.Conv2D(num_anchors * (num_classes + 4), (3, 3), activation="relu", padding="same"),
+        keras.layers.Reshape((-1, num_classes + 4))
     ])
-
-    # Anchors
-    # how the hell am i supposed to do the anchor generation
-    anchors = tf.ones((NUM_ANCHORS, 4), dtype=tf.float32)
-
-    input_tensor = keras.layers.Input(shape=input_shape)
 
     # Connect backbone output to detection head input
+    input_tensor = keras.layers.Input(shape=input_shape)
     x = backbone(input_tensor)
     detection_output = detection_head(x)
 
     # Create the complete model
-    model = keras.Model(inputs=input_tensor, outputs=[detection_output, anchors])
+    model = keras.Model(inputs=input_tensor, outputs=detection_output)
 
     return model
 
 
 # Create the model
-# model = custom_model_sequential((224, 224, 3), NUM_CLASSES)
-model = custom_model((224, 224, 3), NUM_CLASSES)
+model = custom_model(INPUT_SHAPE, NUM_CLASSES, anchors)
+
+print("MODEL HAS BEEN CREATED")
 
 
-# Custom loss function
 def custom_loss(y_true, y_pred):
-    # TODO: Implement custom loss function
-    return  # loss
+    # Split y_true and y_pred into class labels and bounding box coordinates
+    y_true_boxes, y_true_classes = tf.split(y_true, [4, NUM_CLASSES], axis=-1)
+    y_pred_boxes, y_pred_classes = tf.split(y_pred, [4, NUM_CLASSES], axis=-1)
+
+    # Compute categorical cross-entropy loss for the class labels
+    class_loss = keras.losses.categorical_crossentropy(y_true_classes, y_pred_classes)
+
+    # Compute smooth L1 loss for the bounding box coordinates
+    box_loss = keras.losses.huber(y_true_boxes, y_pred_boxes)
+
+    # Combine the two losses
+    total_loss = class_loss + box_loss
+
+    return total_loss
 
 
 # Compile the model
-model.compile(optimizer="adam")
+model.compile(optimizer="adam", loss=custom_loss)
 
 # Training
-model.fit(train_dataset, epochs=NUM_EPOCHS)
+model.fit(train_dataset, epochs=NUM_EPOCHS, verbose=1)
+
+# Evaluate the model
+# model.evaluate(test_dataset, verbose=1)
 
 # Save the model
 model.save(OUTPUT_DIR + "custom_model_sequential.h5")
-
-# Inference
-# loaded_model = keras.models.load_model(OUTPUT_DIR + "cortex_model.h5")
-
-# Predict
-# predictions = loaded_model.predict(new_data)

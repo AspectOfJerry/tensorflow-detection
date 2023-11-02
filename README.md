@@ -1,5 +1,3 @@
-# tensorflow-detector
-
 ## [MobileNet](https://arxiv.org/pdf/1704.04861.pdf) body architecture
 
 - Type: Type of layer or operation in the neural network.
