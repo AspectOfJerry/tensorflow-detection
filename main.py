@@ -7,18 +7,16 @@ from utils import log, Ccodes
 # Constants
 DATASET_DIR = "./dataset"
 OUTPUT_DIR = "./output"
-
-# NUM_CLASSES = 3  # Number of classes, including the background class (+1) <- ?
 NUM_CLASSES = 3
 LABEL_MAP = {
     "background": 0,
     "cube": 1,
     "cone": 2
 }
-
 INPUT_SHAPE = (224, 224, 3)
 NUM_EPOCHS = 16
 BATCH_SIZE = 32
+NUM_ANCHORS = 9  # The maximum number of objects that can be detected in an image
 
 log(f"Training configuration:"
     f"\n\t- Number of classes (including background): {NUM_CLASSES}"
@@ -27,7 +25,7 @@ log(f"Training configuration:"
     f"\n\t- Batch size: {BATCH_SIZE}"
     f"\n\t- Label map: {LABEL_MAP}", Ccodes.BLUE)
 
-train_dataset = CustomDataset(DATASET_DIR, "train", INPUT_SHAPE, BATCH_SIZE, LABEL_MAP)
+train_dataset = CustomDataset(DATASET_DIR, "train", INPUT_SHAPE, BATCH_SIZE, LABEL_MAP, NUM_ANCHORS)
 
 log(f"Number of training images: {len(train_dataset)}", Ccodes.GREEN)
 
@@ -116,14 +114,19 @@ def custom_model(input_shape, num_classes, anchors):
 
 # Create the model
 model = custom_model(INPUT_SHAPE, NUM_CLASSES, anchors)
-
-print("MODEL HAS BEEN CREATED")
+print("Model created")
 
 
 def custom_loss(y_true, y_pred):
+    print("Shape of y_true:", tf.shape(y_true))
+    print("Shape of y_pred:", tf.shape(y_pred))
+    print("NUM_CLASSES:", NUM_CLASSES)
     # Split y_true and y_pred into class labels and bounding box coordinates
     y_true_boxes, y_true_classes = tf.split(y_true, [4, NUM_CLASSES], axis=-1)
     y_pred_boxes, y_pred_classes = tf.split(y_pred, [4, NUM_CLASSES], axis=-1)
+
+    # Remove the extra dimension from y_pred_classes
+    y_pred_classes = tf.squeeze(y_pred_classes, axis=1)
 
     # Compute categorical cross-entropy loss for the class labels
     class_loss = keras.losses.categorical_crossentropy(y_true_classes, y_pred_classes)
@@ -131,13 +134,13 @@ def custom_loss(y_true, y_pred):
     # Compute smooth L1 loss for the bounding box coordinates
     box_loss = keras.losses.huber(y_true_boxes, y_pred_boxes)
 
-    # Combine the two losses
-    total_loss = class_loss + box_loss
+    # Average the losses
+    total_loss = tf.reduce_mean(class_loss + box_loss)
 
     return total_loss
 
 
-# Compile the model
+# Compile the models
 model.compile(optimizer="adam", loss=custom_loss)
 
 # Training

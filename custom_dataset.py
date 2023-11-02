@@ -6,7 +6,7 @@ from utils import log, Ccodes
 
 
 class CustomDataset(tf.keras.utils.Sequence):
-    def __init__(self, root_dir, data_split, image_size, batch_size, label_map):
+    def __init__(self, root_dir, data_split, image_size, batch_size, label_map, num_anchors):
         self.root_dir = root_dir
         self.data_split = data_split  # "train" or "test"
         self.image_dir = os.path.join(root_dir, data_split, "images")
@@ -15,6 +15,7 @@ class CustomDataset(tf.keras.utils.Sequence):
         self.image_size = image_size
         self.batch_size = batch_size
         self.label_map = label_map
+        self.num_anchors = num_anchors
 
     def __len__(self):
         return len(self.image_files)
@@ -40,46 +41,53 @@ class CustomDataset(tf.keras.utils.Sequence):
 
         # Adjust bounding box coordinates [0, 1]
         adjusted_bounding_boxes = []
-        for box in bounding_boxes:
-            xmin, ymin, xmax, ymax = box["boxes"]
+        for box in bounding_boxes["bounding_boxes"]:
+            xmin, ymin, xmax, ymax = box["xmin"], box["ymin"], box["xmax"], box["ymax"]
             xmin = tf.cast(xmin, tf.float32) / original_width
             xmax = tf.cast(xmax, tf.float32) / original_width
             ymin = tf.cast(ymin, tf.float32) / original_height
             ymax = tf.cast(ymax, tf.float32) / original_height
-            adjusted_bounding_boxes.append({"labels": box["labels"], "boxes": [xmin, ymin, xmax, ymax]})
+            adjusted_bounding_boxes.append([xmin, ymin, xmax, ymax])
 
-        print("image shape", image.shape)
-        print("adjusted bboxes", adjusted_bounding_boxes)
         log(f"- Bounding boxes: {adjusted_bounding_boxes}", Ccodes.GRAY)
 
-        target_boxes = tf.convert_to_tensor([bb["boxes"] for bb in adjusted_bounding_boxes], dtype=tf.float32)
+        target_boxes = tf.convert_to_tensor(adjusted_bounding_boxes, dtype=tf.float32)
 
-        labels = [label for bb in adjusted_bounding_boxes for label in bb["labels"]]
-        label_indices = tf.convert_to_tensor([self.label_map[label] for label in labels], dtype=tf.int64)
+        labels = [box["name"] for box in bounding_boxes["bounding_boxes"]]
+        label_indices = [self.label_map[label] for label in labels]
+
+        # Create a one-hot encoded label for each bounding box
+        y_true_classes = tf.convert_to_tensor([tf.one_hot(index, depth=4) for index in label_indices], dtype=tf.float32)
+
+        # If the number of objects in an image is less than num_anchors, pad y_true with zeros
+        if tf.shape(y_true_classes)[0] < self.num_anchors:
+            padding = tf.zeros([self.num_anchors - tf.shape(y_true_classes)[0], 4 + len(self.label_map)], dtype=tf.float32)
+            y_true_classes = tf.concat([y_true_classes, padding], axis=0)
+            target_boxes = tf.concat([target_boxes, padding[:, :4]], axis=0)
 
         # Combine boxes and labels into a single tensor for the loss function
-        y_true = tf.concat([target_boxes, tf.one_hot(label_indices, depth=len(self.label_map))], axis=-1)
+        y_true = tf.concat([target_boxes, y_true_classes], axis=-1)
 
         return image, y_true
 
-    def parse_xml_annotation(self, xml_file):
-        log(f"Parsing {xml_file}")
-        tree = xml.etree.ElementTree.parse(xml_file)
+    def parse_xml_annotation(self, annotation_file):
+        log(f"Parsing {annotation_file}", Ccodes.YELLOW)
+        tree = xml.etree.ElementTree.parse(annotation_file)
         root = tree.getroot()
 
+        size = root.find("size")
+        width = int(size.find("width").text)
+        height = int(size.find("height").text)
+
+        objects = root.findall("object")
         bounding_boxes = []
+        for obj in objects:
+            name = obj.find("name").text
+            bndbox = obj.find("bndbox")
+            xmin = int(bndbox.find("xmin").text)
+            ymin = int(bndbox.find("ymin").text)
+            xmax = int(bndbox.find("xmax").text)
+            ymax = int(bndbox.find("ymax").text)
+            bounding_boxes.append({"name": name, "xmin": xmin, "ymin": ymin, "xmax": xmax, "ymax": ymax})
 
-        for obj in root.findall("object"):
-            label = obj.find("name").text
-            bbox = obj.find("bndbox")
-            xmin = int(bbox.find("xmin").text)
-            ymin = int(bbox.find("ymin").text)
-            xmax = int(bbox.find("xmax").text)
-            ymax = int(bbox.find("ymax").text)
-
-            bounding_boxes.append({
-                "labels": [label],
-                "boxes": [xmin, ymin, xmax, ymax]
-            })
-
-        return bounding_boxes
+        return {"width": width, "height": height, "bounding_boxes": bounding_boxes}
