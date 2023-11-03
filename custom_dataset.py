@@ -1,12 +1,12 @@
 import os
 import tensorflow as tf
-import xml
+from xml.etree import ElementTree
 
 from utils import log, Ccodes
 
 
 class CustomDataset(tf.keras.utils.Sequence):
-    def __init__(self, root_dir, data_split, image_size, batch_size, label_map, num_anchors):
+    def __init__(self, root_dir, data_split, image_size, batch_size, label_map, num_anchors, num_classes):
         self.root_dir = root_dir
         self.data_split = data_split  # "train" or "test"
         self.image_dir = os.path.join(root_dir, data_split, "images")
@@ -16,6 +16,7 @@ class CustomDataset(tf.keras.utils.Sequence):
         self.batch_size = batch_size
         self.label_map = label_map
         self.num_anchors = num_anchors
+        self.num_classes = num_classes
 
     def __len__(self):
         return len(self.image_files)
@@ -49,7 +50,7 @@ class CustomDataset(tf.keras.utils.Sequence):
             ymax = tf.cast(ymax, tf.float32) / original_height
             adjusted_bounding_boxes.append([xmin, ymin, xmax, ymax])
 
-        log(f"- Bounding boxes: {adjusted_bounding_boxes}", Ccodes.GRAY)
+        # log(f"- Bounding boxes: {adjusted_bounding_boxes}", Ccodes.GRAY)
 
         target_boxes = tf.convert_to_tensor(adjusted_bounding_boxes, dtype=tf.float32)
 
@@ -57,12 +58,12 @@ class CustomDataset(tf.keras.utils.Sequence):
         label_indices = [self.label_map[label] for label in labels]
 
         # Create a one-hot encoded label for each bounding box
-        y_true_classes = tf.convert_to_tensor([tf.one_hot(index, depth=4) for index in label_indices], dtype=tf.float32)
+        y_true_classes = tf.convert_to_tensor([tf.one_hot(index, depth=self.num_classes) for index in label_indices], dtype=tf.float32)
 
         # If the number of objects in an image is less than num_anchors, pad y_true with zeros
         if tf.shape(y_true_classes)[0] < self.num_anchors:
-            padding = tf.zeros([self.num_anchors - tf.shape(y_true_classes)[0], 4 + len(self.label_map)], dtype=tf.float32)
-            y_true_classes = tf.concat([y_true_classes, padding], axis=0)
+            padding = tf.zeros([self.num_anchors - tf.shape(y_true_classes)[0], 4 + self.num_classes], dtype=tf.float32)
+            y_true_classes = tf.concat([y_true_classes, padding[:, 4:]], axis=0)
             target_boxes = tf.concat([target_boxes, padding[:, :4]], axis=0)
 
         # Combine boxes and labels into a single tensor for the loss function
@@ -71,8 +72,8 @@ class CustomDataset(tf.keras.utils.Sequence):
         return image, y_true
 
     def parse_xml_annotation(self, annotation_file):
-        log(f"Parsing {annotation_file}", Ccodes.YELLOW)
-        tree = xml.etree.ElementTree.parse(annotation_file)
+        # log(f"Parsing {annotation_file}", Ccodes.YELLOW)
+        tree = ElementTree.parse(annotation_file)
         root = tree.getroot()
 
         size = root.find("size")

@@ -25,7 +25,7 @@ log(f"Training configuration:"
     f"\n\t- Batch size: {BATCH_SIZE}"
     f"\n\t- Label map: {LABEL_MAP}", Ccodes.BLUE)
 
-train_dataset = CustomDataset(DATASET_DIR, "train", INPUT_SHAPE, BATCH_SIZE, LABEL_MAP, NUM_ANCHORS)
+train_dataset = CustomDataset(DATASET_DIR, "train", INPUT_SHAPE, BATCH_SIZE, LABEL_MAP, NUM_ANCHORS, NUM_CLASSES)
 
 log(f"Number of training images: {len(train_dataset)}", Ccodes.GREEN)
 
@@ -117,22 +117,76 @@ model = custom_model(INPUT_SHAPE, NUM_CLASSES, anchors)
 print("Model created")
 
 
+# Author: basically GitHub Copilot
+# def custom_loss(y_true, y_pred):
+#     # Expand the dimensions of y_true to make it a rank 3 tensor
+#     y_true = tf.expand_dims(y_true, axis=1)
+
+#     # Print the shapes of y_true and y_pred
+#     print("y_true shape:", tf.shape(y_true))
+#     print("y_pred shape:", tf.shape(y_pred))
+
+#     # Determine the maximum number of bounding boxes
+#     max_boxes = tf.reduce_max([tf.shape(y_true)[1], tf.shape(y_pred)[1]])
+
+#     # Pad y_true and y_pred with zeros so they have the same number of boxes
+#     y_true = tf.pad(y_true, [[0, 0], [0, max_boxes - tf.shape(y_true)[1]], [0, 0]])
+#     y_pred = tf.pad(y_pred, [[0, 0], [0, max_boxes - tf.shape(y_pred)[1]], [0, 0]])
+
+#     # Split y_true and y_pred into class labels and bounding box coordinates
+#     y_true_boxes, y_true_classes = tf.split(y_true, [4, NUM_CLASSES], axis=-1)
+#     y_pred_boxes, y_pred_classes = tf.split(y_pred, [4, NUM_CLASSES], axis=-1)
+
+#     # Compute categorical cross-entropy loss for the class labels
+#     class_loss = keras.losses.categorical_crossentropy(y_true_classes, y_pred_classes)
+
+#     # Compute smooth L1 loss for the bounding box coordinates
+#     box_loss = keras.losses.huber(y_true_boxes, y_pred_boxes)
+
+#     # Average the losses
+#     total_loss = tf.reduce_mean(class_loss + box_loss)
+
+#     return total_loss
+
+# Author: basically GitHub Copilot
 def custom_loss(y_true, y_pred):
-    print("Shape of y_true:", tf.shape(y_true))
-    print("Shape of y_pred:", tf.shape(y_pred))
-    print("NUM_CLASSES:", NUM_CLASSES)
+    # Expand the dimensions of y_true to make it a rank 3 tensor
+    y_true = tf.expand_dims(y_true, axis=1)
+
+    # Print the shapes of y_true and y_pred
+    tf.print("y_true shape:", tf.shape(y_true))
+    tf.print("y_pred shape:", tf.shape(y_pred))
+
+    # Determine the maximum number of bounding boxes
+    max_boxes = tf.reduce_max([tf.shape(y_true)[1], tf.shape(y_pred)[1]])
+
+    # Pad y_true and y_pred with zeros so they have the same number of boxes
+    y_true = tf.pad(y_true, [[0, 0], [0, max_boxes - tf.shape(y_true)[1]], [0, 0]])
+    y_pred = tf.pad(y_pred, [[0, 0], [0, max_boxes - tf.shape(y_pred)[1]], [0, 0]])
+
+    # Print the shapes of y_true and y_pred after padding
+    tf.print("y_true shape after padding:", tf.shape(y_true))
+    tf.print("y_pred shape after padding:", tf.shape(y_pred))
+
     # Split y_true and y_pred into class labels and bounding box coordinates
     y_true_boxes, y_true_classes = tf.split(y_true, [4, NUM_CLASSES], axis=-1)
     y_pred_boxes, y_pred_classes = tf.split(y_pred, [4, NUM_CLASSES], axis=-1)
 
-    # Remove the extra dimension from y_pred_classes
-    y_pred_classes = tf.squeeze(y_pred_classes, axis=1)
+    # Print the shapes of the split tensors
+    tf.print("y_true_boxes shape:", tf.shape(y_true_boxes))
+    tf.print("y_true_classes shape:", tf.shape(y_true_classes))
+    tf.print("y_pred_boxes shape:", tf.shape(y_pred_boxes))
+    tf.print("y_pred_classes shape:", tf.shape(y_pred_classes))
 
     # Compute categorical cross-entropy loss for the class labels
     class_loss = keras.losses.categorical_crossentropy(y_true_classes, y_pred_classes)
 
     # Compute smooth L1 loss for the bounding box coordinates
     box_loss = keras.losses.huber(y_true_boxes, y_pred_boxes)
+
+    # Print the losses
+    tf.print("class_loss:", class_loss)
+    tf.print("box_loss:", box_loss)
 
     # Average the losses
     total_loss = tf.reduce_mean(class_loss + box_loss)
