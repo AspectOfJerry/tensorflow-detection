@@ -1,7 +1,7 @@
 import tensorflow as tf
 from tensorflow import keras
 
-from custom_dataset import CustomDataset
+from custom_dataset import create_dataset
 from utils import log, Ccodes
 
 # Constants
@@ -25,7 +25,8 @@ log(f"Training configuration:"
     f"\n\t- Batch size: {BATCH_SIZE}"
     f"\n\t- Label map: {LABEL_MAP}", Ccodes.BLUE)
 
-train_dataset = CustomDataset(DATASET_DIR, "train", INPUT_SHAPE, BATCH_SIZE, LABEL_MAP, NUM_ANCHORS, NUM_CLASSES)
+train_dataset = create_dataset(DATASET_DIR, "train", INPUT_SHAPE, BATCH_SIZE, LABEL_MAP, NUM_ANCHORS, NUM_CLASSES)
+# test_dataset = create_dataset(DATASET_DIR, "test", INPUT_SHAPE, BATCH_SIZE, LABEL_MAP, NUM_ANCHORS, NUM_CLASSES)
 
 log(f"Number of training images: {len(train_dataset)}", Ccodes.GREEN)
 
@@ -118,37 +119,6 @@ print("Model created")
 
 
 # Author: basically GitHub Copilot
-# def custom_loss(y_true, y_pred):
-#     # Expand the dimensions of y_true to make it a rank 3 tensor
-#     y_true = tf.expand_dims(y_true, axis=1)
-
-#     # Print the shapes of y_true and y_pred
-#     print("y_true shape:", tf.shape(y_true))
-#     print("y_pred shape:", tf.shape(y_pred))
-
-#     # Determine the maximum number of bounding boxes
-#     max_boxes = tf.reduce_max([tf.shape(y_true)[1], tf.shape(y_pred)[1]])
-
-#     # Pad y_true and y_pred with zeros so they have the same number of boxes
-#     y_true = tf.pad(y_true, [[0, 0], [0, max_boxes - tf.shape(y_true)[1]], [0, 0]])
-#     y_pred = tf.pad(y_pred, [[0, 0], [0, max_boxes - tf.shape(y_pred)[1]], [0, 0]])
-
-#     # Split y_true and y_pred into class labels and bounding box coordinates
-#     y_true_boxes, y_true_classes = tf.split(y_true, [4, NUM_CLASSES], axis=-1)
-#     y_pred_boxes, y_pred_classes = tf.split(y_pred, [4, NUM_CLASSES], axis=-1)
-
-#     # Compute categorical cross-entropy loss for the class labels
-#     class_loss = keras.losses.categorical_crossentropy(y_true_classes, y_pred_classes)
-
-#     # Compute smooth L1 loss for the bounding box coordinates
-#     box_loss = keras.losses.huber(y_true_boxes, y_pred_boxes)
-
-#     # Average the losses
-#     total_loss = tf.reduce_mean(class_loss + box_loss)
-
-#     return total_loss
-
-# Author: basically GitHub Copilot
 def custom_loss(y_true, y_pred):
     # Expand the dimensions of y_true to make it a rank 3 tensor
     y_true = tf.expand_dims(y_true, axis=1)
@@ -183,6 +153,13 @@ def custom_loss(y_true, y_pred):
 
     # Compute smooth L1 loss for the bounding box coordinates
     box_loss = keras.losses.huber(y_true_boxes, y_pred_boxes)
+
+    # Create a mask for the non-empty bounding boxes in y_true
+    mask = tf.reduce_any(y_true != 0, axis=-1)
+
+    # Apply the mask to the losses
+    class_loss = tf.boolean_mask(class_loss, mask)
+    box_loss = tf.boolean_mask(box_loss, mask)
 
     # Print the losses
     tf.print("class_loss:", class_loss)
