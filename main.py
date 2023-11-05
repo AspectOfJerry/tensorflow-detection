@@ -1,7 +1,7 @@
 import tensorflow as tf
 from tensorflow import keras
 
-from custom_dataset import create_dataset
+from custom_dataset import CustomDataset
 from utils import log, Ccodes
 
 # Constants
@@ -25,31 +25,28 @@ log(f"Training configuration:"
     f"\n\t- Batch size: {BATCH_SIZE}"
     f"\n\t- Label map: {LABEL_MAP}", Ccodes.BLUE)
 
-train_dataset = create_dataset(DATASET_DIR, "train", INPUT_SHAPE, BATCH_SIZE, LABEL_MAP, NUM_ANCHORS, NUM_CLASSES)
-# test_dataset = create_dataset(DATASET_DIR, "test", INPUT_SHAPE, BATCH_SIZE, LABEL_MAP, NUM_ANCHORS, NUM_CLASSES)
 
-log(f"Number of training images: {len(train_dataset)}", Ccodes.GREEN)
-
-
-def generate_anchors(input_shape, scales, aspect_ratios):
+def generate_anchors(input_shape, scales, aspect_ratios, anchor_stride):
     anchors = []
 
     input_height, input_width = input_shape[:2]
 
-    for scale in scales:
-        for aspect_ratio in aspect_ratios:
-            width = scale * aspect_ratio
-            height = scale / aspect_ratio
+    for y in range(0, input_height, anchor_stride):
+        for x in range(0, input_width, anchor_stride):
+            for scale in scales:
+                for aspect_ratio in aspect_ratios:
+                    width = scale * aspect_ratio
+                    height = scale / aspect_ratio
 
-            x_center = input_width / 2
-            y_center = input_height / 2
+                    x_center = x + anchor_stride / 2
+                    y_center = y + anchor_stride / 2
 
-            x1 = x_center - width / 2
-            y1 = y_center - height / 2
-            x2 = x_center + width / 2
-            y2 = y_center + height / 2
+                    x1 = x_center - width / 2
+                    y1 = y_center - height / 2
+                    x2 = x_center + width / 2
+                    y2 = y_center + height / 2
 
-            anchors.append([x1, y1, x2, y2])
+                    anchors.append([x1, y1, x2, y2])
 
     return tf.constant(anchors, dtype=tf.float32)
 
@@ -57,7 +54,16 @@ def generate_anchors(input_shape, scales, aspect_ratios):
 # Generate the anchors
 scales = [1.0, 2.0]
 aspect_ratios = [1.0, 2.0]
-anchors = generate_anchors(INPUT_SHAPE, scales, aspect_ratios)
+anchor_stride = 16
+anchors = generate_anchors(INPUT_SHAPE, scales, aspect_ratios, anchor_stride)
+
+# Create a Dataset
+dataset = CustomDataset(DATASET_DIR, "train", INPUT_SHAPE, BATCH_SIZE, LABEL_MAP, anchors)
+data = dataset.load_data()
+data = data.batch(BATCH_SIZE)
+
+
+# log(f"Number of training images: {len(data)}", Ccodes.GREEN)
 
 
 # Define the model architecture (based on MobileNet)
@@ -118,55 +124,47 @@ model = custom_model(INPUT_SHAPE, NUM_CLASSES, anchors)
 print("Model created")
 
 
-# Author: basically GitHub Copilot
+# def custom_loss(y_true, y_pred):
+#     print("y_true shape:", y_true.shape)
+#     print("y_pred shape:", y_pred.shape)
+#     # Split y_true and y_pred into class labels and bounding box coordinates
+#     y_true_boxes, y_true_classes = tf.split(y_true, [3, NUM_CLASSES], axis=-1)
+#     y_pred_boxes, y_pred_classes = tf.split(y_pred, [3, NUM_CLASSES], axis=-1)
+#
+#     print("y_true_boxes shape:", y_true_boxes.shape)
+#     print("y_true_classes shape:", y_true_classes.shape)
+#     print("y_pred_boxes shape:", y_pred_boxes.shape)
+#     print("y_pred_classes shape:", y_pred_classes.shape)
+#     # Calculate categorical cross-entropy loss for class labels
+#     class_loss = tf.reduce_mean(tf.keras.losses.categorical_crossentropy(y_true_classes, y_pred_classes))
+#
+#     # Calculate smooth L1 loss for bounding box coordinates
+#     diff = y_true_boxes - y_pred_boxes
+#     abs_diff = tf.abs(diff)
+#     smooth_l1_loss = tf.where(abs_diff < 1, 0.5 * tf.square(diff), abs_diff - 0.5)
+#     box_loss = tf.reduce_mean(tf.reduce_sum(smooth_l1_loss, axis=-1))
+#
+#     # Compute your total loss as a combination of class and box loss (modify weights as needed)
+#     total_loss = class_loss + box_loss
+#
+#     return total_loss
+
 def custom_loss(y_true, y_pred):
-    # Expand the dimensions of y_true to make it a rank 3 tensor
-    y_true = tf.expand_dims(y_true, axis=1)
-
-    # Print the shapes of y_true and y_pred
-    tf.print("y_true shape:", tf.shape(y_true))
-    tf.print("y_pred shape:", tf.shape(y_pred))
-
-    # Determine the maximum number of bounding boxes
-    max_boxes = tf.reduce_max([tf.shape(y_true)[1], tf.shape(y_pred)[1]])
-
-    # Pad y_true and y_pred with zeros so they have the same number of boxes
-    y_true = tf.pad(y_true, [[0, 0], [0, max_boxes - tf.shape(y_true)[1]], [0, 0]])
-    y_pred = tf.pad(y_pred, [[0, 0], [0, max_boxes - tf.shape(y_pred)[1]], [0, 0]])
-
-    # Print the shapes of y_true and y_pred after padding
-    tf.print("y_true shape after padding:", tf.shape(y_true))
-    tf.print("y_pred shape after padding:", tf.shape(y_pred))
-
     # Split y_true and y_pred into class labels and bounding box coordinates
     y_true_boxes, y_true_classes = tf.split(y_true, [4, NUM_CLASSES], axis=-1)
     y_pred_boxes, y_pred_classes = tf.split(y_pred, [4, NUM_CLASSES], axis=-1)
 
-    # Print the shapes of the split tensors
-    tf.print("y_true_boxes shape:", tf.shape(y_true_boxes))
-    tf.print("y_true_classes shape:", tf.shape(y_true_classes))
-    tf.print("y_pred_boxes shape:", tf.shape(y_pred_boxes))
-    tf.print("y_pred_classes shape:", tf.shape(y_pred_classes))
+    # Calculate categorical cross-entropy loss for class labels
+    class_loss = tf.reduce_mean(tf.keras.losses.categorical_crossentropy(y_true_classes, y_pred_classes))
 
-    # Compute categorical cross-entropy loss for the class labels
-    class_loss = keras.losses.categorical_crossentropy(y_true_classes, y_pred_classes)
+    # Calculate smooth L1 loss for bounding box coordinates
+    diff = y_true_boxes - y_pred_boxes
+    abs_diff = tf.abs(diff)
+    smooth_l1_loss = tf.where(abs_diff < 1, 0.5 * tf.square(diff), abs_diff - 0.5)
+    box_loss = tf.reduce_mean(tf.reduce_sum(smooth_l1_loss, axis=-1))
 
-    # Compute smooth L1 loss for the bounding box coordinates
-    box_loss = keras.losses.huber(y_true_boxes, y_pred_boxes)
-
-    # Create a mask for the non-empty bounding boxes in y_true
-    mask = tf.reduce_any(y_true != 0, axis=-1)
-
-    # Apply the mask to the losses
-    class_loss = tf.boolean_mask(class_loss, mask)
-    box_loss = tf.boolean_mask(box_loss, mask)
-
-    # Print the losses
-    tf.print("class_loss:", class_loss)
-    tf.print("box_loss:", box_loss)
-
-    # Average the losses
-    total_loss = tf.reduce_mean(class_loss + box_loss)
+    # Compute your total loss as a combination of class and box loss (modify weights as needed)
+    total_loss = class_loss + box_loss
 
     return total_loss
 
@@ -174,8 +172,9 @@ def custom_loss(y_true, y_pred):
 # Compile the models
 model.compile(optimizer="adam", loss=custom_loss)
 
+print("Model output shape:", model.output_shape)
 # Training
-model.fit(train_dataset, epochs=NUM_EPOCHS, verbose=1)
+model.fit(data, epochs=NUM_EPOCHS, verbose=1)
 
 # Evaluate the model
 # model.evaluate(test_dataset, verbose=1)

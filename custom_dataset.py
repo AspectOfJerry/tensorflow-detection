@@ -1,95 +1,69 @@
-import os
 import tensorflow as tf
+import os
 from xml.etree import ElementTree
-
-from utils import log, Ccodes
-
-
-def load_and_preprocess_data(image_file, annotation_file, image_size, label_map, num_anchors, num_classes):
-    image = tf.io.read_file(image_file)
-    image = tf.image.decode_jpeg(image, channels=3)
-    image = tf.image.resize(image, [image_size[0], image_size[1]])
-    image = image / 255.0  # normalize to [0,1] range
-
-    bounding_boxes = tf.numpy_function(parse_xml_annotation, [annotation_file], tf.float32)
-    bounding_boxes.set_shape([None, 4])
-
-    # Calculate the scaling factors
-    original_size = tf.shape(image)[:2]
-    original_height, original_width = tf.cast(original_size[0], dtype=tf.float32), tf.cast(original_size[1], dtype=tf.float32)
-    scale_width = image_size[1] / original_width
-    scale_height = image_size[0] / original_height
-
-    # Resize the image
-    image = tf.image.resize(image, list(image_size)[:2])
-    image = tf.image.per_image_standardization(image)
-
-    # Adjust bounding box coordinates [0, 1]
-    adjusted_bounding_boxes = []
-    for box in bounding_boxes["bounding_boxes"]:
-        xmin, ymin, xmax, ymax = box["xmin"], box["ymin"], box["xmax"], box["ymax"]
-        xmin = tf.cast(xmin, tf.float32) / original_width
-        xmax = tf.cast(xmax, tf.float32) / original_width
-        ymin = tf.cast(ymin, tf.float32) / original_height
-        ymax = tf.cast(ymax, tf.float32) / original_height
-        adjusted_bounding_boxes.append([xmin, ymin, xmax, ymax])
-
-    target_boxes = tf.convert_to_tensor(adjusted_bounding_boxes, dtype=tf.float32)
-
-    labels = [box["name"] for box in bounding_boxes["bounding_boxes"]]
-    label_indices = [label_map[label] for label in labels]
-
-    # Create a one-hot encoded label for each bounding box
-    y_true_classes = tf.convert_to_tensor([tf.one_hot(index, depth=num_classes) for index in label_indices], dtype=tf.float32)
-
-    # If the number of objects in an image is less than num_anchors, pad y_true with zeros
-    if tf.shape(y_true_classes)[0] < num_anchors:
-        padding = tf.zeros([num_anchors - tf.shape(y_true_classes)[0], 4 + num_classes], dtype=tf.float32)
-        y_true_classes = tf.concat([y_true_classes, padding[:, 4:]], axis=0)
-        target_boxes = tf.concat([target_boxes, padding[:, :4]], axis=0)
-
-    # Combine boxes and labels into a single tensor for the loss function
-    y_true = tf.concat([target_boxes, y_true_classes], axis=-1)
-
-    return image, y_true
+import numpy as np
 
 
-def parse_xml_annotation(annotation_file):
-    # log(f"Parsing {annotation_file}", Ccodes.YELLOW)
-    tree = ElementTree.parse(annotation_file)
-    root = tree.getroot()
+class CustomDataset:
+    def __init__(self, dataset_dir, mode, input_shape, batch_size, label_map, anchors):
+        self.dataset_dir = dataset_dir
+        self.mode = mode
+        self.input_shape = input_shape
+        self.batch_size = batch_size
+        self.label_map = label_map
+        self.anchors = anchors
 
-    size = root.find("size")
-    width = int(size.find("width").text)
-    height = int(size.find("height").text)
+    def load_data(self):
+        def generator():
+            for image_file in os.listdir(self.dataset_dir):
+                image_path = os.path.join(self.dataset_dir, image_file)
+                image = tf.image.decode_jpeg(tf.io.read_file(image_path), channels=3)
 
-    objects = root.findall("object")
-    bounding_boxes = []
-    for obj in objects:
-        name = obj.find("name").text
-        bndbox = obj.find("bndbox")
-        xmin = int(bndbox.find("xmin").text)
-        ymin = int(bndbox.find("ymin").text)
-        xmax = int(bndbox.find("xmax").text)
-        ymax = int(bndbox.find("ymax").text)
-        bounding_boxes.append({"name": name, "xmin": xmin, "ymin": ymin, "xmax": xmax, "ymax": ymax})
+                annotation_file = os.path.join(self.dataset_dir, os.path.splitext(image_file)[0] + ".xml")
+                bounding_boxes, labels = self.parse_xml_annotation(annotation_file, image)
 
-    # Convert bounding_boxes to a tensor
-    bounding_boxes = [[box["xmin"], box["ymin"], box["xmax"], box["ymax"]] for box in bounding_boxes]
-    bounding_boxes_tensor = tf.convert_to_tensor(bounding_boxes, dtype=tf.float32)
+                # Resize and preprocess the image
+                image = tf.image.resize(image, self.input_shape[:2])
+                image = tf.image.per_image_standardization(image)
 
-    return bounding_boxes_tensor
+                # Create one-hot encoded labels and bounding box coordinates for each bounding box
+                y_true = np.zeros((len(self.anchors), len(self.label_map) + 3))
+                for i, (bbox, label) in enumerate(zip(bounding_boxes, labels)):
+                    label_index = self.label_map[label]
+                    y_true[i, label_index] = 1  # one-hot encoded class label
+                    y_true[i, -3:] = bbox  # bounding box coordinates
 
+                yield image, y_true
 
-def create_dataset(root_dir, data_split, image_size, batch_size, label_map, num_anchors, num_classes):
-    image_dir = os.path.join(root_dir, data_split, "images")
-    annotation_dir = os.path.join(root_dir, data_split, "annotations")
+        return tf.data.Dataset.from_generator(generator, output_signature=(
+            tf.TensorSpec(shape=(self.input_shape[0], self.input_shape[1], self.input_shape[2]), dtype=tf.float32),
+            tf.TensorSpec(shape=(len(self.anchors), len(self.label_map) + 3), dtype=tf.float32)))
 
-    image_files = tf.data.Dataset.list_files(os.path.join(image_dir, '*.jpg'))
-    annotation_files = tf.data.Dataset.list_files(os.path.join(annotation_dir, '*.xml'))
+    def parse_xml_annotation(self, annotation_file, image):
+        tree = ElementTree.parse(annotation_file)
+        root = tree.getroot()
 
-    dataset = tf.data.Dataset.zip((image_files, annotation_files))
-    dataset = dataset.map(lambda x, y: load_and_preprocess_data(x, y, image_size, label_map, num_anchors, num_classes))
-    dataset = dataset.batch(batch_size)
+        bounding_boxes = []
+        labels = []
 
-    return dataset
+        original_height, original_width = image.shape[0], image.shape[1]
+
+        for obj in root.findall("object"):
+            name = obj.find("name").text
+            labels.append(name)
+
+            bndbox = obj.find("bndbox")
+            xmin = int(bndbox.find("xmin").text)
+            ymin = int(bndbox.find("ymin").text)
+            xmax = int(bndbox.find("xmax").text)
+            ymax = int(bndbox.find("ymax").text)
+
+            # Resize bounding box coordinates based on the new image dimensions
+            xmin = xmin * self.input_shape[1] // original_width
+            ymin = ymin * self.input_shape[0] // original_height
+            xmax = xmax * self.input_shape[1] // original_width
+            ymax = ymax * self.input_shape[0] // original_height
+
+            bounding_boxes.append([xmin, ymin, xmax, ymax])
+
+        return bounding_boxes, labels
