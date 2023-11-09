@@ -11,6 +11,8 @@
 - FC: Fully connected layer.
 - Softmax: Softmax layer.
 
+Backbone
+
 |      # |     Type \| Stride     | Kernel Shape  | Input Shape |
 |-------:|:----------------------:|:-------------:|:-----------:|
 |  **1** |      Conv2D \| s2      |   3x3x3x32    |  224x224x3  |
@@ -41,5 +43,8 @@
 | **26** | DepthwiseConv2D \| s2  |  3x3x1024 dw  |  7x7x1024   |
 |     27 |      Conv2D \| s1      | 1x1x1024x1024 |  7x7x1024   |
 |     28 | AveragePooling2D \| s1 |  7x7x1024 dw  |  7x7x1024   |
-|     29 |        FC \| s1        | 1x1x1024x1000 |  1x1x1024   |
-| **30** |     Softmax \| s1      |  Classifier   |  1x1x1000   |
+
+Detection head
+
+| # | Type \| Stride | Kernel Shape | Input Shape |
+|--:|:--------------:|:------------:|:-----------:|

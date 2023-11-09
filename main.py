@@ -15,8 +15,8 @@ LABEL_MAP = {
 }
 INPUT_SHAPE = (224, 224, 3)
 NUM_EPOCHS = 16
-BATCH_SIZE = 32
-NUM_ANCHORS = 9  # The maximum number of objects that can be detected in an image
+BATCH_SIZE = 8
+NUM_ANCHORS = 9  # The maximum number of objects that can be detected in an image. is it needed?
 
 log(f"Training configuration:"
     f"\n\t- Number of classes (including background): {NUM_CLASSES}"
@@ -45,6 +45,10 @@ def generate_anchors(input_shape, scales, aspect_ratios, anchor_stride):
                     y1 = y_center - height / 2
                     x2 = x_center + width / 2
                     y2 = y_center + height / 2
+                    # x1 = (x_center - width / 2) / input_width
+                    # y1 = (y_center - height / 2) / input_height
+                    # x2 = (x_center + width / 2) / input_width
+                    # y2 = (y_center + height / 2) / input_height
 
                     anchors.append([x1, y1, x2, y2])
 
@@ -124,46 +128,22 @@ model = custom_model(INPUT_SHAPE, NUM_CLASSES, anchors)
 print("Model created")
 
 
-# def custom_loss(y_true, y_pred):
-#     print("y_true shape:", y_true.shape)
-#     print("y_pred shape:", y_pred.shape)
-#     # Split y_true and y_pred into class labels and bounding box coordinates
-#     y_true_boxes, y_true_classes = tf.split(y_true, [3, NUM_CLASSES], axis=-1)
-#     y_pred_boxes, y_pred_classes = tf.split(y_pred, [3, NUM_CLASSES], axis=-1)
-#
-#     print("y_true_boxes shape:", y_true_boxes.shape)
-#     print("y_true_classes shape:", y_true_classes.shape)
-#     print("y_pred_boxes shape:", y_pred_boxes.shape)
-#     print("y_pred_classes shape:", y_pred_classes.shape)
-#     # Calculate categorical cross-entropy loss for class labels
-#     class_loss = tf.reduce_mean(tf.keras.losses.categorical_crossentropy(y_true_classes, y_pred_classes))
-#
-#     # Calculate smooth L1 loss for bounding box coordinates
-#     diff = y_true_boxes - y_pred_boxes
-#     abs_diff = tf.abs(diff)
-#     smooth_l1_loss = tf.where(abs_diff < 1, 0.5 * tf.square(diff), abs_diff - 0.5)
-#     box_loss = tf.reduce_mean(tf.reduce_sum(smooth_l1_loss, axis=-1))
-#
-#     # Compute your total loss as a combination of class and box loss (modify weights as needed)
-#     total_loss = class_loss + box_loss
-#
-#     return total_loss
-
 def custom_loss(y_true, y_pred):
-    # Split y_true and y_pred into class labels and bounding box coordinates
-    y_true_boxes, y_true_classes = tf.split(y_true, [4, NUM_CLASSES], axis=-1)
-    y_pred_boxes, y_pred_classes = tf.split(y_pred, [4, NUM_CLASSES], axis=-1)
+    # Separate the class labels and the bounding box coordinates in y_true
+    y_true_class = y_true[..., :NUM_CLASSES]
+    y_true_box = y_true[..., NUM_CLASSES:]
 
-    # Calculate categorical cross-entropy loss for class labels
-    class_loss = tf.reduce_mean(tf.keras.losses.categorical_crossentropy(y_true_classes, y_pred_classes))
+    # Separate the class predictions and the bounding box predictions in y_pred
+    y_pred_class = y_pred[..., :NUM_CLASSES]
+    y_pred_box = y_pred[..., NUM_CLASSES:]
 
-    # Calculate smooth L1 loss for bounding box coordinates
-    diff = y_true_boxes - y_pred_boxes
-    abs_diff = tf.abs(diff)
-    smooth_l1_loss = tf.where(abs_diff < 1, 0.5 * tf.square(diff), abs_diff - 0.5)
-    box_loss = tf.reduce_mean(tf.reduce_sum(smooth_l1_loss, axis=-1))
+    # Compute binary cross-entropy loss for the classes
+    class_loss = tf.keras.losses.BinaryCrossentropy()(y_true_class, y_pred_class)
 
-    # Compute your total loss as a combination of class and box loss (modify weights as needed)
+    # Compute smooth L1 loss for the bounding boxes
+    box_loss = tf.keras.losses.Huber()(y_true_box, y_pred_box)
+
+    # Compute the total loss
     total_loss = class_loss + box_loss
 
     return total_loss
@@ -176,8 +156,14 @@ print("Model output shape:", model.output_shape)
 # Training
 model.fit(data, epochs=NUM_EPOCHS, verbose=1)
 
-# Evaluate the model
-# model.evaluate(test_dataset, verbose=1)
+# Evaluate the model on the training data
+train_loss = model.evaluate(data, verbose=1)
+print("Train loss:", train_loss)
+
+# Make predictions on the training data
+predictions = model.predict(data)
+
+print(predictions)
 
 # Save the model
 model.save(OUTPUT_DIR + "custom_model_sequential.h5")

@@ -13,6 +13,26 @@ class CustomDataset:
         self.label_map = label_map
         self.anchors = anchors
 
+    def iou(self, box1, box2):
+        # Calculate the (x, y)-coordinates of the intersection rectangle
+        xA = max(box1[0], box2[0])
+        yA = max(box1[1], box2[1])
+        xB = min(box1[2], box2[2])
+        yB = min(box1[3], box2[3])
+
+        # Compute the area of intersection rectangle
+        interArea = max(0, xB - xA + 1) * max(0, yB - yA + 1)
+
+        # Compute the area of both the prediction and ground-truth rectangles
+        box1Area = (box1[2] - box1[0] + 1) * (box1[3] - box1[1] + 1)
+        box2Area = (box2[2] - box2[0] + 1) * (box2[3] - box2[1] + 1)
+
+        # Compute the intersection over union by taking the intersection area and
+        # dividing it by the sum of prediction + ground-truth areas - the intersection area
+        iou = interArea / float(box1Area + box2Area - interArea)
+
+        return iou
+
     def load_data(self):
         def generator():
             for image_file in os.listdir(os.path.join(self.dataset_dir, self.split, "images")):
@@ -28,10 +48,12 @@ class CustomDataset:
 
                 # Create one-hot encoded labels and bounding box coordinates for each bounding box
                 y_true = np.zeros((len(self.anchors), len(self.label_map) + 4))  # +4 for bounding box coordinates
-                for i, (bbox, label) in enumerate(zip(bounding_boxes, labels)):
+                for bbox, label in zip(bounding_boxes, labels):
                     label_index = self.label_map[label]
-                    y_true[i, label_index] = 1  # one-hot encoded class label
-                    y_true[i, -4:] = bbox  # bounding box coordinates
+                    iou_scores = [self.iou(bbox, anchor) for anchor in self.anchors]
+                    anchor_index = np.argmax(iou_scores)
+                    y_true[anchor_index, label_index] = 1  # one-hot encoded class label
+                    y_true[anchor_index, -4:] = bbox  # bounding box coordinates
 
                 yield image, y_true
 
