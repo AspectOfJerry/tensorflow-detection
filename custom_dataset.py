@@ -1,65 +1,63 @@
 import tensorflow as tf
-import os
 from xml.etree import ElementTree
+import os
 import numpy as np
 
 
-class CustomDataset:
-    def __init__(self, dataset_dir, split, input_shape, batch_size, label_map, anchors):
+class CustomDataset(tf.keras.utils.Sequence):
+    def __init__(self, dataset_dir, split, input_shape, batch_size, label_map):
         self.dataset_dir = dataset_dir
         self.split = split  # "train" or "test"
         self.input_shape = input_shape
         self.batch_size = batch_size
         self.label_map = label_map
-        self.anchors = anchors
+        self.image_dir = os.path.join(self.dataset_dir, self.split, "images")
+        self.image_files = os.listdir(self.image_dir)
+        self.num_classes = len(label_map)
+        self.num_anchors = 9  # max number of objects per image
 
-    def iou(self, box1, box2):
-        # Calculate the (x, y)-coordinates of the intersection rectangle
-        xA = max(box1[0], box2[0])
-        yA = max(box1[1], box2[1])
-        xB = min(box1[2], box2[2])
-        yB = min(box1[3], box2[3])
+    def __len__(self):
+        return int(np.ceil(len(self.image_files) / float(self.batch_size)))
 
-        # Compute the area of intersection rectangle
-        interArea = max(0, xB - xA + 1) * max(0, yB - yA + 1)
+    # def __len__(self):
+    #     return (len(self.image_files) + self.batch_size - 1) // self.batch_size
 
-        # Compute the area of both the prediction and ground-truth rectangles
-        box1Area = (box1[2] - box1[0] + 1) * (box1[3] - box1[1] + 1)
-        box2Area = (box2[2] - box2[0] + 1) * (box2[3] - box2[1] + 1)
+    def __getitem__(self, idx):
+        batch_x = []
+        batch_y = []
 
-        # Compute the intersection over union by taking the intersection area and
-        # dividing it by the sum of prediction + ground-truth areas - the intersection area
-        iou = interArea / float(box1Area + box2Area - interArea)
+        for i in range(self.batch_size):
+            image_file = os.path.join(self.image_dir, self.image_files[idx * self.batch_size + i])
+            image = tf.image.decode_jpeg(tf.io.read_file(image_file), channels=3)
 
-        return iou
+            annotation_file = os.path.join(self.dataset_dir, self.split, "annotations",
+                                           os.path.splitext(self.image_files[idx * self.batch_size + i])[0] + ".xml")
+            bounding_boxes = self.parse_xml_annotation(annotation_file, image)
 
-    def load_data(self):
-        def generator():
-            for image_file in os.listdir(os.path.join(self.dataset_dir, self.split, "images")):
-                image_path = os.path.join(self.dataset_dir, self.split, "images", image_file)
-                image = tf.image.decode_jpeg(tf.io.read_file(image_path), channels=3)
+            # Resize and standardize the image
+            image = tf.image.resize(image, (self.input_shape[0], self.input_shape[1]))
+            image = tf.image.per_image_standardization(image)
 
-                annotation_file = os.path.join(self.dataset_dir, self.split, "annotations", os.path.splitext(image_file)[0] + ".xml")
-                bounding_boxes, labels = self.parse_xml_annotation(annotation_file, image)
+            target_boxes = tf.convert_to_tensor([list(box.values()) for box in bounding_boxes["bounding_boxes"]], dtype=tf.float32)
+            labels = bounding_boxes["labels"]
+            label_indices = [self.label_map[label] for label in labels]
 
-                # Resize and preprocess the image
-                image = tf.image.resize(image, self.input_shape[:2])
-                image = tf.image.per_image_standardization(image)
+            # Create a one-hot encoded label for each bounding box
+            y_true_classes = tf.convert_to_tensor([tf.one_hot(index, depth=self.num_classes) for index in label_indices], dtype=tf.float32)
 
-                # Create one-hot encoded labels and bounding box coordinates for each bounding box
-                y_true = np.zeros((len(self.anchors), len(self.label_map) + 4))  # +4 for bounding box coordinates
-                for bbox, label in zip(bounding_boxes, labels):
-                    label_index = self.label_map[label]
-                    iou_scores = [self.iou(bbox, anchor) for anchor in self.anchors]
-                    anchor_index = np.argmax(iou_scores)
-                    y_true[anchor_index, label_index] = 1  # one-hot encoded class label
-                    y_true[anchor_index, -4:] = bbox  # bounding box coordinates
+            # If the number of objects in an image is less than num_anchors, pad y_true with zeros
+            if tf.shape(y_true_classes)[0] < self.num_anchors:
+                padding = tf.zeros([self.num_anchors - tf.shape(y_true_classes)[0], self.num_classes], dtype=tf.float32)
+                y_true_classes = tf.concat([y_true_classes, padding], axis=0)
+                target_boxes = tf.concat([target_boxes, tf.zeros([self.num_anchors - tf.shape(target_boxes)[0], 4])], axis=0)
 
-                yield image, y_true
+            # Combine boxes and labels into a single tensor for the loss function
+            y_true = tf.concat([target_boxes, y_true_classes], axis=-1)
 
-        return tf.data.Dataset.from_generator(generator, output_signature=(
-            tf.TensorSpec(shape=(self.input_shape[0], self.input_shape[1], self.input_shape[2]), dtype=tf.float32),
-            tf.TensorSpec(shape=(len(self.anchors), len(self.label_map) + 4), dtype=tf.float32)))  # +4 for bounding box coordinates
+            batch_x.append(image)
+            batch_y.append(y_true)
+
+        return tf.stack(batch_x), tf.stack(batch_y)
 
     def parse_xml_annotation(self, annotation_file, image):
         tree = ElementTree.parse(annotation_file)
@@ -86,6 +84,6 @@ class CustomDataset:
             xmax = xmax * self.input_shape[1] // original_width
             ymax = ymax * self.input_shape[0] // original_height
 
-            bounding_boxes.append([xmin, ymin, xmax, ymax])
+            bounding_boxes.append({"xmin": xmin, "ymin": ymin, "xmax": xmax, "ymax": ymax})
 
-        return bounding_boxes, labels
+        return {"bounding_boxes": bounding_boxes, "labels": labels}
