@@ -12,6 +12,7 @@ LABEL_MAP = {"background": 0, "cube": 1, "cone": 2}
 INPUT_SHAPE = (224, 224, 3)
 NUM_EPOCHS = 16
 BATCH_SIZE = 8
+NUM_PREDICTIONS = 9
 
 log(f"Training configuration:"
     f"\n\t- Number of classes (including background): {NUM_CLASSES}"
@@ -21,10 +22,10 @@ log(f"Training configuration:"
     f"\n\t- Label map: {LABEL_MAP}", Ccodes.BLUE)
 
 # Create dataset
-dataset = CustomDataset(DATASET_DIR, "train", INPUT_SHAPE, BATCH_SIZE, LABEL_MAP)
+dataset = CustomDataset(DATASET_DIR, "train", INPUT_SHAPE, BATCH_SIZE, LABEL_MAP, NUM_PREDICTIONS)
 
 
-def custom_model(input_shape, num_classes):
+def custom_model(input_shape, num_classes, num_predictions=9):
     # Backbone (Convolutional Base)
     base_model = tf.keras.applications.EfficientNetB0(weights="imagenet", include_top=False, input_shape=input_shape)
     base_model.trainable = False
@@ -36,8 +37,8 @@ def custom_model(input_shape, num_classes):
     # ])
     # Detection head
     detection_head = keras.Sequential([
-        keras.layers.Conv2D(9 * (num_classes + 4), (3, 3), activation="relu", padding="same"),
-        keras.layers.Reshape((-1, 9, num_classes + 4))
+        keras.layers.Conv2D(num_predictions * (num_classes + 4), (3, 3), activation="relu", padding="same"),
+        keras.layers.Reshape((-1, num_predictions, num_classes + 4))
     ])
 
     # Connect backbone output to detection head input
@@ -51,29 +52,41 @@ def custom_model(input_shape, num_classes):
 
 
 # Create the model
-model = custom_model(INPUT_SHAPE, NUM_CLASSES)
+model = custom_model(INPUT_SHAPE, NUM_CLASSES, NUM_PREDICTIONS)
+
+model.summary()
 
 
 def custom_loss(y_true, y_pred):
-    y_true_class = y_true[..., :NUM_CLASSES]
-    y_true_box = y_true[..., NUM_CLASSES:]
-    y_pred_class = y_pred[..., :NUM_CLASSES]
-    y_pred_box = y_pred[..., NUM_CLASSES:]
-
+    print("------------------------------------------------------------------------------")
     print("Debugging custom loss function:")
-    print("y_true_class shape:", y_true_class.shape)
-    print("y_true_box shape:", y_true_box.shape)
-    print("y_pred_class shape:", y_pred_class.shape)
-    print("y_pred_box shape:", y_pred_box.shape)
+
+    y_true_class = y_true[..., :NUM_CLASSES]
+    y_true_bbox = y_true[..., NUM_CLASSES:]
+    y_pred_class = y_pred[..., :NUM_CLASSES]
+    y_pred_bbox = y_pred[..., NUM_CLASSES:]
 
     # Print the shapes before the binary crossentropy calculation
-    print("Before binary crossentropy:")
+    print("BEFORE binary crossentropy:")
     print("y_true_class shape:", y_true_class.shape)
+    print("y_true_bbox shape:", y_true_bbox.shape)
     print("y_pred_class shape:", y_pred_class.shape)
+    print("y_pred_bbox shape:", y_pred_bbox.shape)
+
+    print("------------------------------------------------------------------------------")
 
     class_loss = tf.keras.losses.BinaryCrossentropy()(y_true_class, y_pred_class)
-    box_loss = tf.keras.losses.Huber()(y_true_box, y_pred_box)
+    box_loss = tf.keras.losses.Huber()(y_true_bbox, y_pred_bbox)
     total_loss = class_loss + box_loss
+
+    # Print the shapes after the binary crossentropy calculation
+    print("AFTER binary crossentropy:")
+    print("y_true_class shape:", y_true_class.shape)
+    print("y_true_bbox shape:", y_true_bbox.shape)
+    print("y_pred_class shape:", y_pred_class.shape)
+    print("y_pred_bbox shape:", y_pred_bbox.shape)
+
+    print("------------------------------------------------------------------------------")
 
     print("class_loss:", class_loss)
     print("box_loss:", box_loss)
