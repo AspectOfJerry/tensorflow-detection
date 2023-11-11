@@ -52,15 +52,13 @@ class CustomDataset(tf.keras.utils.Sequence):
             annotation_file = os.path.join(
                 self.dataset_dir, self.split, 
                 "annotations", os.path.splitext(self.image_files[idx * self.batch_size + i])[0] + ".xml"
-            )
+                )
             
             bounding_boxes = self.parse_xml_annotation(annotation_file, image)
             
             # Resize and standardize the image
             image = tf.image.resize(image, (self.input_shape[0], self.input_shape[1]))
             image = tf.image.per_image_standardization(image)
-            batch_x.append(image)
-
             target_boxes = tf.convert_to_tensor([list(box.values()) for box in bounding_boxes["bounding_boxes"]], dtype=tf.float32)
             labels = bounding_boxes["labels"]
             label_indices = [self.label_map[label] for label in labels]
@@ -69,21 +67,31 @@ class CustomDataset(tf.keras.utils.Sequence):
             y_true = tf.zeros([49, self.num_predictions, self.num_classes + 5])
             target_boxes = target_boxes / [self.input_shape[1], self.input_shape[0], self.input_shape[1], self.input_shape[0]]
 
-            # For each bounding box
+             # For each bounding box
             for box, label in zip(target_boxes, label_indices):
                 # Determine which cell the bounding box belongs to
-                cell_x = int(box[0] * 7)  # requires box coordinates be normalized
-                cell_y = int(box[1] * 7)  # requires box coordinates be normalized
+                cell_x = int(box[0] * 7)# requires box coordinates be normalized
+                cell_y = int(box[1] * 7)# requires box coordinates be normalized
                 cell_index = cell_y * 7 + cell_x
 
-                ious = tf.convert_to_tensor([self.iou(box, predicted_box) for predicted_box in self.predicted_boxes])
+                # Let IoUs be a tensor of zeros
+                # self.iou(box, y_true[cell_index, :, :4]).numpy().argmax()
+                ious = tf.zeros([self.num_predictions])
+
+                # For each prediction slot
+                for i in range(self.num_predictions):
+                    # Calculate the IoU between the ground truth bounding box and the predicted bounding box
+                    ious[i] = self.iou(box, self.predicted_boxes[i])
 
                 # Determine which prediction slot to use within the cell
                 prediction_index = tf.argmax(ious)
 
                 # Update the corresponding slot in y_true
-                y_true = self.update_y_true(y_true, box, label, cell_index, prediction_index)
+                y_true[cell_index, prediction_index, :4] = box
+                y_true[cell_index, prediction_index, 4] = 1  # This is the objectness score
+                y_true[cell_index, prediction_index, 5:] = tf.one_hot(label, depth=self.num_classes)
 
+            batch_x.append(image)
             batch_y.append(y_true)
 
         return np.array(batch_x), np.array(batch_y)
