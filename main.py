@@ -1,114 +1,60 @@
 import tensorflow as tf
 from tensorflow import keras
-
-from custom_dataset import CustomDataset
+from data_loader import load_coco_data
 from utils import log, Ccodes
 
 # Constants
-DATASET_DIR = "./dataset"
-OUTPUT_DIR = "./output"
-NUM_CLASSES = 3
-LABEL_MAP = {"background": 0, "cube": 1, "cone": 2}
-INPUT_SHAPE = (224, 224, 3)
-NUM_EPOCHS = 16
-BATCH_SIZE = 8
-NUM_PREDICTIONS = 9
+dataset_dir = "./dataset"
+output_dir = "./output"
+category_names = ["cone", "cube"]
+input_shape = (756, 756, 3)
+num_epochs = 16
+batch_size = 8
 
 log(f"Training configuration:"
-    f"\n\t- Number of classes (including background): {NUM_CLASSES}"
-    f"\n\t- Input size: {INPUT_SHAPE}"
-    f"\n\t- Number of epochs: {NUM_EPOCHS}"
-    f"\n\t- Batch size: {BATCH_SIZE}"
-    f"\n\t- Label map: {LABEL_MAP}", Ccodes.BLUE)
+    f"\n\t- Input size: {input_shape}"
+    f"\n\t- Number of epochs: {num_epochs}"
+    f"\n\t- Batch size: {batch_size}"
+    f"\n\t- Category names: {category_names}"
+    f"\n\t- Number of classes: {len(category_names)}", Ccodes.BLUE)
 
 # Create dataset
-dataset = CustomDataset(DATASET_DIR, "train", INPUT_SHAPE, BATCH_SIZE, LABEL_MAP, NUM_PREDICTIONS)
+train_dataset, test_dataset = load_coco_data(dataset_dir, category_names, batch_size)
 
 
-def custom_model(input_shape, num_classes, num_predictions=9):
-    # Backbone (Convolutional Base)
-    base_model = tf.keras.applications.EfficientNetB0(weights="imagenet", include_top=False, input_shape=input_shape)
+def custom_model(input_shape, num_classes):
+    # Load the MobileNetV3Large base model
+    base_model = tf.keras.applications.MobileNetV3Large(weights="imagenet", include_top=False, input_shape=input_shape)
     base_model.trainable = False
 
-    # Detection head
-    # detection_head = keras.Sequential([
-    #     keras.layers.Conv2D(num_classes + 4, (3, 3), activation="relu", padding="same"),
-    #     keras.layers.Reshape((-1, num_classes + 4))
-    # ])
-    # Detection head
-    detection_head = keras.Sequential([
-        keras.layers.Conv2D(num_predictions * (num_classes + 4), (3, 3), activation="relu", padding="same"),
-        keras.layers.Reshape((-1, num_predictions, num_classes + 4))
-    ])
+    # Create a new model using the Functional API
+    inputs = tf.keras.Input(shape=input_shape)
+    x = base_model(inputs, training=False)
 
-    # Connect backbone output to detection head input
-    x = base_model.output
-    detection_output = detection_head(x)
+    # Global Average Pooling
+    x = tf.keras.layers.GlobalAveragePooling2D()(x)
 
-    # Create the complete model
-    model = keras.Model(inputs=base_model.input, outputs=detection_output)
+    # Dense layers for classification
+    x = tf.keras.layers.Dense(128, activation='relu')(x)
+    x = tf.keras.layers.Dropout(0.5)(x)
+    outputs = tf.keras.layers.Dense(num_classes, activation='softmax')(x)
+
+    # Create the model
+    model = tf.keras.Model(inputs, outputs)
 
     return model
 
 
 # Create the model
-model = custom_model(INPUT_SHAPE, NUM_CLASSES, NUM_PREDICTIONS)
-
+model = custom_model(input_shape, len(category_names))
 model.summary()
 
+exit()
 
-def custom_loss(y_true, y_pred):
-    print("------------------------------------------------------------------------------")
-    print("Debugging custom loss function:")
+model.compile(optimizer="adam", loss="sparse_categorical_crossentropy", metrics=['accuracy'])
 
-    y_true_class = y_true[..., :NUM_CLASSES]
-    y_true_bbox = y_true[..., NUM_CLASSES:]
-    y_pred_class = y_pred[..., :NUM_CLASSES]
-    y_pred_bbox = y_pred[..., NUM_CLASSES:]
+model.fit(train_dataset, epochs=num_epochs)
 
-    # Print the shapes before the binary crossentropy calculation
-    print("BEFORE binary crossentropy:")
-    print("y_true_class shape:", y_true_class.shape)
-    print("y_true_bbox shape:", y_true_bbox.shape)
-    print("y_pred_class shape:", y_pred_class.shape)
-    print("y_pred_bbox shape:", y_pred_bbox.shape)
+loss, accuracy = model.evaluate(test_dataset)
 
-    print("------------------------------------------------------------------------------")
-
-    class_loss = tf.keras.losses.BinaryCrossentropy()(y_true_class, y_pred_class)
-    box_loss = tf.keras.losses.Huber()(y_true_bbox, y_pred_bbox)
-    total_loss = class_loss + box_loss
-
-    # Print the shapes after the binary crossentropy calculation
-    print("AFTER binary crossentropy:")
-    print("y_true_class shape:", y_true_class.shape)
-    print("y_true_bbox shape:", y_true_bbox.shape)
-    print("y_pred_class shape:", y_pred_class.shape)
-    print("y_pred_bbox shape:", y_pred_bbox.shape)
-
-    print("------------------------------------------------------------------------------")
-
-    print("class_loss:", class_loss)
-    print("box_loss:", box_loss)
-    print("total_loss:", total_loss)
-
-    return total_loss
-
-
-# Compile the model
-model.compile(optimizer="adam", loss=custom_loss)
-
-# Training loop
-for epoch in range(NUM_EPOCHS):
-    for batch_idx in range(len(dataset)):
-        images, y_true = dataset[batch_idx]
-
-        # Training step
-        model.train_on_batch(images, y_true)
-
-# Evaluate the model on the training data
-train_loss = model.evaluate(dataset, verbose=1)
-print("Train loss:", train_loss)
-
-# Save the model
-model.save(OUTPUT_DIR + "custom_model_sequential.h5")
+model.save(output_dir + "/model.h5")
