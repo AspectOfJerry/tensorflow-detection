@@ -49,8 +49,6 @@ def custom_model(input_shape, num_classes):
 model = custom_model(input_shape, len(category_names))
 model.summary()
 
-exit()
-
 model.compile(optimizer="adam", loss="sparse_categorical_crossentropy", metrics=['accuracy'])
 
 model.fit(train_dataset, epochs=num_epochs)
